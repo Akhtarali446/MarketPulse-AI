@@ -17,7 +17,8 @@ and cold-start priors.
 -   [Data and Feature Pipeline](#data-and-feature-pipeline)
 -   [Data Quality and Testing](#data-quality-and-testing)
 -   [Data Files and Git](#data-files-and-git)
--   [Integration Notes](#integration-notes)
+-   [Data Files and Git](#data-files-and-git)
+-   [How to Add a New Region](#How to Add a New Region)
 -   [Troubleshooting](#troubleshooting)
 
 ## Overview
@@ -315,6 +316,68 @@ git push origin main
 
 Adjust the branch name if your repository uses a different default
 branch.
+
+## How to Add a New Region
+
+The Context Layer uses a pluggable adapter pattern. To support a new region (e.g., East Africa):
+
+Step 1: Create a New Regional Adapter File
+Create src/regional_adapters/east_africa.py and inherit from BaseRegionalAdapter:
+
+``` python
+"""
+src/regional_adapters/east_africa.py
+Regional context adapter for East Africa (Kenya/Tanzania).
+"""
+
+from typing import List
+import pandas as pd
+from src.regional_adapters.base import BaseRegionalAdapter
+
+
+class EastAfricaAdapter(BaseRegionalAdapter):
+    def __init__(self):
+        super().__init__(region_id="east_africa", currency="KES")
+
+    def get_context_features(self, dates: pd.DatetimeIndex, store_ids: List[str]) -> pd.DataFrame:
+        records = []
+        for d in dates:
+            # Regional context logic (paydays, public holidays, market days)
+            is_payday = 1.0 if d.day in [28, 29, 30, 31] else 0.0
+            is_market_day = 1.0 if d.dayofweek == 2 else 0.0  # Wednesday market
+            
+            for s_id in store_ids:
+                records.extend([
+                    {"date": d, "store_id": s_id, "feature_name": "is_payday", "value": is_payday, "source": self.region_id, "is_fallback": False},
+                    {"date": d, "store_id": s_id, "feature_name": "is_market_day", "value": is_market_day, "source": self.region_id, "is_fallback": False},
+                ])
+        return pd.DataFrame(records)
+```
+Step 2: Export in src/regional_adapters/__init__.py
+Add the new adapter to the module exports:
+
+``` python
+from .base import BaseRegionalAdapter
+from .south_asia import SouthAsiaAdapter
+from .ecuador_stub import EcuadorAdapterStub
+from .east_africa import EastAfricaAdapter
+
+__all__ = ["BaseRegionalAdapter", "SouthAsiaAdapter", "EcuadorAdapterStub", "EastAfricaAdapter"]
+```
+Step 3: Register in ContextEngine (src/context_layer.py)
+Add the adapter to ContextEngine.__init__():
+
+``` python
+from src.regional_adapters import SouthAsiaAdapter, EcuadorAdapterStub, EastAfricaAdapter
+
+class ContextEngine:
+    def __init__(self):
+        self.adapters = {
+            "south_asia": SouthAsiaAdapter(),
+            "ecuador": EcuadorAdapterStub(),
+            "east_africa": EastAfricaAdapter(),  # Registered new region
+        }
+```
 
 ## Integration Notes
 
