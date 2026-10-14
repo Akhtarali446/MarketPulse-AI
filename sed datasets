@@ -1,0 +1,5 @@
+ data/processed/cold_start_priors.csv      |    41 [32m+[m
+ data/processed/full_ml_feature_matrix.csv | 73001 [32m++++++++++++++++++++++++++++[m
+ data/processed/items_catalog.csv          |    21 [32m+[m
+ data/processed/stores_metadata.csv        |    11 [32m+[m
+ 4 files changed, 73074 insertions(+)
