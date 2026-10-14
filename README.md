@@ -19,6 +19,7 @@ and cold-start priors.
 -   [Data Files and Git](#data-files-and-git)
 -   [Data Files and Git](#data-files-and-git)
 -   [How to Add a New Region](#How-to-Add-a-New-Region)
+-   [Integration Notes](#Integration-Notes)
 -   [Troubleshooting](#troubleshooting)
 
 ## Overview
