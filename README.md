@@ -6,10 +6,6 @@ inventory-optimization pipeline. It provides dataset adapters, schema
 validation, preprocessing, stockout handling, calendar/context features,
 and cold-start priors.
 
-> **Status:** Hackathon project component. Confirm the current data
-> schemas and loader return signature with the other team members before
-> integrating downstream modules.
-
 ## Contents
 
 -   [Overview](#overview)
@@ -30,24 +26,16 @@ This component is intended to provide downstream forecasting,
 optimization, and evaluation modules with consistent retail data.
 
 Key responsibilities include:
-
--   Loading supported datasets through a common loader.
--   Producing and validating sales, store, item/product, and context
-    tables.
--   Generating synthetic retail data for development and reproducible
-    testing.
--   Supporting public-dataset adapters, including Favorita and M5 where
-    configured.
--   Handling stockout-related records carefully so that zero observed
-    sales during unavailable inventory are not automatically interpreted
-    as zero demand.
--   Creating calendar/context features and cold-start priors.
--   Keeping time-series feature engineering and evaluation splits
-    chronological to reduce data leakage.
+- Loading supported datasets through a unified `load_dataset()` loader.
+- Producing and validating canonical `sales`, `stores`, `items`, and `context` tables.
+- Generating synthetic retail data with configurable market effects (paydays, festivals, weather, school terms).
+- Supporting public-dataset adapters (Favorita and M5).
+- Handling stockout censoring so zero sales during out-of-stock days are not misread as zero demand.
+- Extracting cyclical calendar maps, price elasticity signals, EWMA, and non-leaking rolling statistics.
+- Generating cold-start store demand priors using `scikit-learn` KMeans clustering.
+- Enforcing strict chronological time-series splitting to eliminate data leakage.
 
 ## Architecture
-
-At a high level, the data flow is:
 
 ``` text
 Raw or generated data
@@ -73,29 +61,28 @@ Forecasting, inventory optimization, and evaluation
 ``` text
 data_and_context_layer/
 ├── config/
-│   └── synthetic_config.yaml
+│   └── synthetic_config.yaml         # Synthetic demand parameters
 ├── data/
-│   ├── raw/                 # Raw input CSVs or source data
-│   └── processed/           # Generated feature tables and metadata
+│   ├── raw/                          # Lightweight source CSV fixtures (.gitkeep tracked)
+│   └── processed/                    # Generated ML feature matrix (ignored by Git)
 ├── src/
-│   ├── canonical_schemas.py
-│   ├── synthetic_generator.py
-│   ├── pipeline.py
-│   ├── context_layer.py
-│   ├── regional_adapters/
-│   ├── cold_start.py
-│   ├── public_dataset_adapters.py
-│   └── loader.py
-├── tests/
-├── CONTRACT.md
-├── DATA_QUALITY_REPORT.md
-├── README.md
-├── requirements.txt
-├── export_processed.py
-└── verify_high_class.py
-```
+│   ├── __init__.py                   # Package exports
+│   ├── canonical_schemas.py          # Pydantic & Pandas schema validators
+│   ├── synthetic_generator.py        # Reproducible synthetic demand generator
+│   ├── pipeline.py                   # Feature pipeline (Lags, EWMA, Calendar, Elasticity)
+│   ├── context_layer.py              # Context engine with audit logs and fallbacks
+│   ├── regional_adapters/            # Regional calendar & currency plug-ins
+│   ├── cold_start.py                 # Scikit-learn KMeans store demographic clustering
+│   ├── public_dataset_adapters.py    # M5 and Favorita benchmark adapters
+│   └── loader.py                     # Unified dataset loading entrypoint
+├── tests/                            # Automated pytest test suite
+├── CONTRACT.md                       # Canonical data contract specifications
+├── DATA_QUALITY_REPORT.md            # Data governance & quality audit
+├── README.md                         # Project documentation & integration guide
+├── requirements.txt                  # Pinned Python dependencies
+├── export_processed.py              # Exports local feature matrix to data/processed/
+└── verify_high_class.py              # Feature matrix execution check script
 
-The exact contents may change as the hackathon implementation evolves.
 
 ## Requirements
 
@@ -109,11 +96,9 @@ The exact contents may change as the hackathon implementation evolves.
 ### 1. Clone the repository
 
 ``` bash
-git clone <YOUR_REPOSITORY_URL>
+git clone [https://github.com/Akhtarali446/MarketPulse-AI.git](https://github.com/Akhtarali446/MarketPulse-AI.git)
 cd data_and_context_layer
 ```
-
-Replace `<YOUR_REPOSITORY_URL>` with the URL of your repository.
 
 ### 2. Create and activate a virtual environment
 
@@ -140,14 +125,15 @@ pip install -r requirements.txt
 
 ## Loading a Dataset
 
-The central entry point is `load_dataset` in `src/loader.py`.
+The central entry point is load_dataset() in src/loader.py.
 
-The current implementation has supported names including:
+It returns four canonical DataFrames: (sales_df, stores_df, items_df, context_df).
 
--   `synthetic`
--   `synthetic_sparse`
--   `m5`
--   `favorita`
+Supported dataset names:
+synthetic: Reproducible full synthetic retail dataset
+synthetic_sparse: Synthetic sales with randomly omitted records
+m5: Subsampled M5 benchmark adapter
+favorita: Subsampled Favorita benchmark adapter
 
 Check `src/loader.py` for the exact names, adapter requirements, and
 current function signature before running a dataset. The implementation
@@ -158,8 +144,12 @@ Example pattern:
 ``` python
 from src.loader import load_dataset
 
-result = load_dataset("synthetic")
-print(type(result))
+sales_df, stores_df, items_df, context_df = load_dataset("synthetic")
+
+print(f"Sales Shape: {sales_df.shape}")
+print(f"Stores Shape: {stores_df.shape}")
+print(f"Items Shape: {items_df.shape}")
+print(f"Context Shape: {context_df.shape}")
 ```
 
 Inspect the implementation to determine the returned tables and their
@@ -170,15 +160,56 @@ have been aligned.
 
 ## Data and Feature Pipeline
 
-The pipeline is designed to support the following areas:
+To build the complete 35-feature ML matrix for training forecasters:
 
-### Dataset preparation
+``` python
+import pandas as pd
+from src.loader import load_dataset
+from src.canonical_schemas import pivot_context
+from src.pipeline import (
+    reindex_continuous_dates,
+    flag_stockouts,
+    cap_outliers_iqr,
+    add_cyclical_calendar_features,
+    add_price_features,
+    add_lag_and_rolling_features,
+)
 
--   Load raw or generated data.
--   Normalize column names and data types.
--   Validate required fields and keys.
--   Check duplicate store--item--date records and other data-quality
-    problems.
+# 1. Load source tables
+sales_df, stores_df, items_df, context_df = load_dataset("synthetic")
+
+# 2. Reindex dates & compute features
+clean_sales = reindex_continuous_dates(sales_df)
+stockout_sales = flag_stockouts(clean_sales)
+capped_sales = cap_outliers_iqr(stockout_sales)
+calendar_sales = add_cyclical_calendar_features(capped_sales)
+price_sales = add_price_features(calendar_sales)
+sales_features = add_lag_and_rolling_features(price_sales)
+
+# 3. Pivot context & merge
+wide_context_df = pivot_context(context_df)
+full_ml_matrix = pd.merge(sales_features, wide_context_df, on=["date", "store_id"], how="left")
+
+print(f"Final ML Feature Matrix Shape: {full_ml_matrix.shape}")
+```
+
+## Exporting Local CSV Deliverables
+
+Run the export script to build and save all tables locally in data/processed/:
+
+``` python
+python export_processed.py
+```
+This generates:
+
+data/processed/full_ml_feature_matrix.csv (73,000 rows x 35 columns)
+
+data/processed/cold_start_priors.csv (Demographic store prior demand profiles)
+
+data/processed/stores_metadata.csv (Store demographic metadata)
+
+data/processed/items_catalog.csv (Product pricing and supplier lead times)
+
 
 ### Stockout handling
 
@@ -336,10 +367,9 @@ of each file.
 
 ## Contributing
 
-1.  Keep schema and contract changes documented.
-2.  Add or update tests when behavior changes.
-3.  Avoid time leakage in time-series features and splits.
-4.  Document data provenance, assumptions, and fallback behavior.
-5.  Run the relevant tests before submitting changes.
+1.  Keep schema and contract changes documented in CONTRACT.md.
+2.  Add or update unit tests in tests/ whenever feature engineering logic changes.
+3.  Prevent future-data leakage in all rolling and lag statistics.
+4.  Update DATA_QUALITY_REPORT.md when data generation or cleaning rules change.
 
 ------------------------------------------------------------------------
