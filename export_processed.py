@@ -31,7 +31,7 @@ out_dir.mkdir(parents=True, exist_ok=True)
 
 full_ml_matrix.to_csv(out_dir / "full_ml_feature_matrix.csv", index=False)
 stores.to_csv(out_dir / "stores_metadata.csv", index=False)
-items.to_csv(out_dir / "items_catalog.csv", index=False)  # Added alias export
+items.to_csv(out_dir / "items_catalog.csv", index=False)
 cold_start_priors.to_csv(out_dir / "cold_start_priors.csv", index=False)
 
-print("Export complete! Files saved to data/processed/")
+print("Export Complete! Deliverables saved in data/processed/")
